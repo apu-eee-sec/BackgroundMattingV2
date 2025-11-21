@@ -165,22 +165,43 @@ else:
 with torch.no_grad():
     for input_batch in tqdm(DataLoader(dataset, batch_size=1, pin_memory=True)):
         if args.video_target_bgr:
-            (src, bgr), tgt_bgr = input_batch
-            tgt_bgr = tgt_bgr.to(device, non_blocking=True)
+           (src, bgr), tgt_bgr = input_batch
         else:
-            src, bgr = input_batch
-            src = src.to(device, non_blocking=True)
-            bgr = bgr.to(device, non_blocking=True)
+           src, bgr = input_batch
+           tgt_bgr = None
 
-            # Determine background type
+        # move all to device
+        src = src.to(device, non_blocking=True)
+        bgr = bgr.to(device, non_blocking=True)
+        if tgt_bgr is not None:
+           tgt_bgr = tgt_bgr.to(device, non_blocking=True)
+        else:
+           # Determine background type
             h, w = src.shape[2], src.shape[3]
             if args.video_target_bgr_color == "white":
                 tgt_bgr = torch.ones(1, 3, h, w, device=device)
             elif args.video_target_bgr_color == "gradient":
-                tgt_bgr = create_radial_gradient(h, w).to(device)
+                tgt_bgr = create_radial_gradient(h, w, device=device)
             else:
                 tgt_bgr = torch.tensor([120 / 255, 255 / 255, 155 / 255], device=device).view(1, 3, 1, 1)
 
+        # -------------------------------------------------------------------
+        # AUTO-MATCH BACKGROUND RESOLUTION TO SOURCE RESOLUTION
+        # -------------------------------------------------------------------
+        h, w = src.shape[2], src.shape[3]
+
+        # Resize video-bgr to match src
+        if bgr.shape[2] != h or bgr.shape[3] != w:
+          bgr = F.interpolate(bgr, size=(h, w), mode='bilinear', align_corners=False)
+
+        # Resize video-target-bgr to match src
+        if args.video_target_bgr and tgt_bgr is not None:
+           if tgt_bgr.shape[2] != h or tgt_bgr.shape[3] != w:
+               tgt_bgr = F.interpolate(tgt_bgr, size=(h, w), mode='bilinear', align_corners=False)
+
+        
+
+            
         # Run model
         if args.model_type == 'mattingbase':
             pha, fgr, err, _ = model(src, bgr)
